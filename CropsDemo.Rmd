@@ -1,0 +1,668 @@
+---
+title: "Fast Demo of UNO Research"
+author: "Nicolaas VanSteenbergen"
+date: "2/17/2020"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE,echo=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, warning=F, message=F,echo=F}
+library(imager)
+library(ggplot2)
+library(dplyr)
+library(reshape2)
+library(EBImage)
+library(stats)
+library(magick)
+```
+
+```{r,echo=F}
+# RESIZE AN IMAGE
+smol <- function(color_image, scale, quality){
+  
+  smaller <- imresize(color_image, scale = scale, interpolation = quality)
+  return(smaller)
+}
+
+image_plotting <- function(picture) {
+
+  BW_df <- as.data.frame(picture) %>%
+    select(x, y, value) %>%
+    group_by(x) %>%
+    summarise(row_threshold = mean(value))
+
+  y <- as.array(BW_df$row_threshold)
+  return(y)
+}
+```
+
+```{r,echo=F}
+x <- 79:400
+num_list <- sprintf("%04d",x)
+raw_names <- NULL
+
+for (i in 1:length(num_list)){
+  
+  if (file.exists(paste0("C:/Users/Nico/Desktop/UNOwork/UAV_IMAGES/DJI_",num_list[i],".JPG"))){
+    raw_names[i] <- paste0("C:/Users/Nico/Desktop/UNOwork/UAV_IMAGES/DJI_",num_list[i],".JPG")
+  }
+}
+raw_names <- raw_names[!is.na(raw_names)]
+```
+
+```{r,echo=F}
+edited_names <- NULL
+
+for (i in 1:length(num_list)){
+  
+  if (file.exists(paste0("C:/Users/Nico/Desktop/UNOwork/DEEP LEARNING CURRENT/edited_images/DJI_",num_list[i],"_tinted.png"))){
+    edited_names[i] <- paste0("C:/Users/Nico/Desktop/UNOwork/DEEP LEARNING CURRENT/edited_images/DJI_",num_list[i],"_tinted.png")
+  }
+}
+edited_names <- edited_names[!is.na(edited_names)]
+```
+
+```{r,echo=F}
+# NORMALIZING LUMINANCE OF IMAGE
+# HISTOGRAM EQUALIZATION
+hist.eq <- function(field) as.cimg(ecdf(field)(field),dim=dim(field))
+
+
+# EXCESS GREEN NO NORMALIZATION
+make_ExG_no_normal <- function(color_image) {
+  
+  df_field <- as.data.frame(color_image, wide="c")
+
+  df_field <- df_field %>%
+    mutate(r_small = c.1/(c.1 + c.2 + c.3)) %>%
+    mutate(g_small = c.2/(c.1 + c.2 + c.3)) %>%
+    mutate(b_small = c.3/(c.1 + c.2 + c.3))
+  
+  df_field <- df_field %>%
+  mutate(r_small = case_when(is.na(r_small) == TRUE ~ 0, is.na(r_small) == FALSE ~ r_small)) %>%
+  mutate(g_small = case_when(is.na(g_small) == TRUE ~ 0, is.na(g_small) == FALSE ~ g_small)) %>%
+  mutate(b_small = case_when(is.na(b_small) == TRUE ~ 0, is.na(b_small) == FALSE ~ b_small))
+
+  df_field <- df_field %>%
+    mutate(ExG = 2*g_small - r_small - b_small)
+
+  df_bw <- df_field %>%
+    dplyr::select(c("x","y","ExG"))
+
+  df_bw <- melt(df_bw, id = c("x","y"))
+
+  names(df_bw)[3] <- "cc"
+
+  df_bw$cc <- as.integer(df_bw$cc)
+
+  df_bw <- Image(df_bw$value, dim = c(max(df_bw$x),max(df_bw$y)), colormode = 'Grayscale')
+
+  return(df_bw)
+}
+
+
+# EXCESS GREEN NORMALIZATION
+make_ExG <- function(color_image) {
+
+  cn <- imsplit(color_image,"c")
+  
+  cn.eq <- map_il(cn,hist.eq)
+  
+  equalized <- imappend(cn.eq,"c")
+  
+  df_field <- as.data.frame(equalized, wide="c")
+
+  df_field <- df_field %>%
+    mutate(r_small = c.1/(c.1 + c.2 + c.3)) %>%
+    mutate(g_small = c.2/(c.1 + c.2 + c.3)) %>%
+    mutate(b_small = c.3/(c.1 + c.2 + c.3))
+
+  df_field <- df_field %>%
+    mutate(ExG = 2*g_small - r_small - b_small)
+
+  df_bw <- df_field %>%
+    dplyr::select(c("x","y","ExG"))
+
+  df_bw <- melt(df_bw, id = c("x","y"))
+
+  names(df_bw)[3] <- "cc"
+
+  df_bw$cc <- as.integer(df_bw$cc)
+
+  df_bw <- Image(df_bw$value, dim = c(max(df_bw$x),max(df_bw$y)), colormode = 'Grayscale')
+
+  return(df_bw)
+}
+```
+
+```{r,warning=F,message=F,echo=F, fig.align="center"}
+image <- raw_names[1]
+img_num <- substr(image,start=46,stop=49)
+raw_image <- load.image(image)
+#edited_image <- load.image(edited_names[26])
+
+raw_image_small <- smol(raw_image, 0.2, 5)
+#edited_image_small <- smol(edited_image, 0.2, 5)
+
+cat('For complete code go to https://github.com/niconaut/CropDetectR')
+
+cat('Beginning Image')
+plot(raw_image_small, axes = F)
+```
+
+\pagebreak
+
+```{r,echo=F,fig.width=5.5,fig.align="center",fig.height=3}
+raw_grayscale <- make_ExG_no_normal(raw_image_small)
+
+cat('Excess Green Index to convert from color image to single-channel grayscale image')
+
+display(raw_grayscale, method='raster')
+```
+
+```{r,echo=F}
+make_bw <- function(image){
+
+  BW <- image > otsu(image, range = c(max(image),min(image)))
+  return(BW)
+}
+```
+
+
+```{r,echo=F,fig.width=5.5,fig.align="center",fig.height=3}
+raw_otsu <- make_bw(raw_grayscale)
+
+cat('Otsu Thresholding to make the grayscale image binary.')
+
+plot(raw_otsu)
+```
+
+\pagebreak
+
+```{r,echo=F}
+blobify <- function(image, size) {
+
+  kern3 <- makeBrush(size, shape = 'box')
+  open1 <- opening(image, kern3)
+
+  close1 <- closing(open1, kern3)
+
+  kern4 <- makeBrush(size + 2, shape = 'box')
+  open2 <- opening(close1, kern4)
+
+  close2 <- closing(open2, kern3)
+
+  open3 <- opening(close2, kern4)
+
+  close3 <- closing(open3, kern4)
+
+  final_blob <- EBImage::dilate(close3, kern3)
+  final_blob_cimg <- as.cimg(final_blob[1:length(final_blob)], dim = c(dim(final_blob)[1], dim(final_blob)[2]))
+
+  return(final_blob_cimg)
+}
+```
+
+```{r,echo=F,fig.width=5.5,fig.align="center",fig.height=3}
+raw_blob <- blobify(raw_otsu, 1)
+
+cat('Morphology to modify Otsu image for a clean view of crop rows. Having the image \nbe as simple and clean as possible will help with row identification.')
+
+display(raw_blob,method='raster')
+```
+
+```{r,echo=F}
+# fix rotations ending
+rotations <- function(picture, degrees) {
+
+  new_deg <- 0
+  rotated <- imrotate(picture, new_deg)
+  picture_list <- rotated
+  # rotation_list <- paste('rotated_',new_deg,sep = "")
+
+  while (new_deg < (360 - degrees)) {
+    new_deg <- new_deg + degrees
+    rotated <- imrotate(picture, new_deg)
+    picture_list <- ci(picture_list, rotated)
+    # rotation_list <- append(rotation_list, paste('rotated_', new_deg, sep = ""))
+  }
+  # return(rotation_list)
+  return(picture_list)
+}
+
+
+smoothing <- function(picture, intensity) {
+
+  BW_df <- as.data.frame(picture) %>%
+    select(x, y, value) %>%
+    group_by(x) %>%
+    summarise(row_threshold = mean(value))
+
+  y <- as.array(BW_df$row_threshold)
+  smoothed <- smooth.spline(BW_df$x,y,spar = intensity)
+  y_smooth <- smoothed$y
+  return(y_smooth)
+}
+
+
+localMaxima <- function(x) {
+  # Use Inf instead if x is numeric (non-integer)
+  y <- diff(c(-.Machine$integer.max, x)) > 0L
+  rle(y)$lengths
+  y <- cumsum(rle(y)$lengths)
+  y <- y[seq.int(1L, length(y), 2L)]
+  if (x[[1]] == x[[2]]) {
+    y <- y[-1]
+  }
+  y
+}
+
+localMinima <- function(x) {
+  # Use Inf instead if x is numeric (non-integer)
+  y <- diff(c(.Machine$integer.max, x)) > 0L
+  rle(y)$lengths
+  y <- cumsum(rle(y)$lengths)
+  y <- y[seq.int(1L, length(y), 2L)]
+  if (x[[1]] == x[[2]]) {
+    y <- y[-1]
+  }
+  y
+}
+
+
+best_rotation <- function(picture_list, ratio, intensity) {
+
+  good_ratios <- NULL
+
+  for (i in 1:length(picture_list)) {
+
+    y_smooth <- smoothing(picture_list[i], intensity)
+    peaks <- localMaxima(y_smooth)
+    valleys <- localMinima(y_smooth)
+
+    crop_rows <- NULL
+
+    for (i in 1:length(peaks)) {
+      right_ratio <- round(abs((y_smooth[peaks[i]]-y_smooth[min(valleys[valleys >= peaks[i]])])/(max(y_smooth))),5)
+      left_ratio <- round(abs((y_smooth[peaks[i]]-y_smooth[max(valleys[valleys <= peaks[i]])])/(max(y_smooth))),5)
+
+      if ((!is.na(left_ratio) & !is.na(right_ratio)) & (left_ratio > (ratio) & right_ratio > (ratio))) {
+        crop_rows[i] <- peaks[i]
+      }
+    }
+    good_ratios <- c(good_ratios,length(na.omit(crop_rows)))
+  }
+  return(which.max(good_ratios))
+}
+
+# add plushen in here?
+crop_lines <- function(picture_list, final_ratio, best_image, intensity) {
+
+  crop_ratios <- NULL
+
+  for (i in 1:length(picture_list)) {
+
+    crop_smooth <- smoothing(picture_list[which.max(best_image)], intensity)
+    peaks <- localMaxima(crop_smooth)
+    valleys <- localMinima(crop_smooth)
+
+    crop_lines <- NULL
+
+    for (i in 1:length(peaks)) {
+
+      right_ratio <- round(abs((crop_smooth[peaks[i]]-crop_smooth[min(valleys[valleys >= peaks[i]])])/(max(crop_smooth))),5)
+      left_ratio <- round(abs((crop_smooth[peaks[i]]-crop_smooth[max(valleys[valleys <= peaks[i]])])/(max(crop_smooth))),5)
+
+      if ((!is.na(left_ratio) & !is.na(right_ratio)) & (left_ratio > (final_ratio) & right_ratio > (final_ratio))) {
+        crop_lines[i] <- peaks[i]
+      }
+    }
+    crop_ratios <- c(crop_ratios,length(na.omit(crop_lines)))
+  }
+  return(na.omit(crop_lines))
+}
+
+
+crop_row_finder <- function(picture_list, ratio, final_ratio, intensity) {
+
+  best_image <- best_rotation(picture_list, ratio, intensity)
+
+  crop_rows <- crop_lines(picture_list, final_ratio, best_image, intensity)
+
+  return(crop_rows)
+}
+```
+
+```{r,echo=F,fig.width=11,fig.align="center",fig.height=3}
+df <- data.frame(image_plotting(raw_blob))
+df$cols <- seq(1,nrow(df))
+
+df_smooth <- data.frame(smoothing(raw_blob, 0.25))
+df_smooth$cols <- seq(1,nrow(df_smooth))
+
+cat('Viewing the image as a line makes it obvious to where the crop \ncenters are, smoothing the line will help identify crop centers and gaps.')
+
+par(mfrow = c(2,1))
+ggplot(data=df, aes(x=cols,y=image_plotting.raw_blob.)) + geom_line() + xlab('Image Column') + ylab('Percent of Crop')
+ggplot(data=df_smooth, aes(x=cols,y=smoothing.raw_blob..0.25.)) + geom_line() + xlab('Image Column') + ylab('Percent of Crop')
+```
+
+\pagebreak
+
+```{r,echo=F,fig.width=5.5,fig.align="center",fig.height=3}
+# edited blob
+max <- localMaxima(smoothing(raw_blob, 0.25))
+min <- localMinima(smoothing(raw_blob, 0.25))
+y_max <- smoothing(raw_blob, 0.25)[max]
+y_min <- smoothing(raw_blob, 0.25)[min]
+
+maximum <- data.frame(max,y_max)
+minimum <- data.frame(min,y_min)
+
+cat('The minimum and maximum correlate to centers and gaps between.\nWe will need a ratio to only choose the maximums we know to be authentic crop rows.')
+
+ggplot(data=df_smooth, aes(x=cols,y=smoothing.raw_blob..0.25.)) + geom_line() + xlab('Image Column') + ylab('Percent of Crop') + geom_point(data=maximum, aes(x=max,y=y_max,color='max')) + geom_point(data=minimum,aes(x=min,y=y_min,color='min')) + theme(legend.position = "none")
+```
+
+```{r, message=F, warning=F,echo=F,fig.width=5.5,fig.align="center",fig.height=3}
+# raw blob
+rotations_list <- rotations(raw_blob, 45)
+best_img <- best_rotation(rotations_list, ratio = 0.5, intensity = 0.25)
+picture_list <- rotations_list
+crop_rows_raw <- crop_row_finder(rotations_list, ratio = 0.5, final_ratio = 0.05, intensity = 0.25)
+
+y_max <- smoothing(raw_blob, 0.25)[crop_rows_raw]
+final_centers_df <- as.data.frame(crop_rows_raw)
+final_centers_df$y_max <- y_max
+
+cat('Applying the ratio.')
+
+ggplot(data=df_smooth, aes(x=cols,y=smoothing.raw_blob..0.25.)) + geom_line() + xlab('Image Column') + ylab('Percent of Crop') + geom_point(data=final_centers_df, aes(x=final_centers_df$crop_rows_raw,y=final_centers_df$y_max,color='max')) + theme(legend.position = "none")
+```
+
+\pagebreak
+
+```{r,echo=F,fig.height=6,fig.align="center"}
+# edited
+
+cat('The morphed image lines up well with the image for a quick validity check.')
+
+plot(raw_image_small, axes = F)
+abline(v = crop_rows_raw, col = 'red')
+```
+
+\pagebreak
+
+```{r,echo=F}
+# edited plushen
+plushen <- function(bw_image){
+  kern_extend <- makeBrush(5, shape = 'line', angle = 90)
+  kern_trim <- makeBrush(3, shape = "line", angle = 0)
+  trimmed <- EBImage::erode(bw_image,kern_trim)
+  extend <- EBImage::dilate(trimmed,kern_extend)
+  return(extend)
+}
+```
+
+```{r,echo=F,fig.width=5.5,fig.align="center",fig.height=3}
+cat('Applying more morphology to extend vertically and trim \nhorizontally to fill in gaps within crop rows.')
+
+raw_plush <- plushen(plushen(raw_blob))
+display(raw_blob,method='raster')
+display(raw_plush,method='raster')
+
+max <- localMaxima(smoothing(raw_plush, 0.25))
+min <- localMinima(smoothing(raw_plush, 0.25))
+y_max <- smoothing(raw_plush, 0.25)[max]
+y_min <- smoothing(raw_plush, 0.25)[min]
+```
+
+```{r,echo=F}
+# VERTICAL STRIPS IN THE IMAGE
+vertical_strips <- function(rotations_list, best_img, intensity, crop_rows, original_image){
+  
+  smooth <- smoothing(rotations_list[1], intensity)
+  peaks <- localMaxima(smooth)
+  valleys <- localMinima(smooth)
+  
+  chunks <- NULL
+  
+  # establishing a chunk object
+  for (i in 1:length(crop_rows)) {
+    
+    middle <- crop_rows[i]
+    left_side <- max(valleys[valleys < crop_rows[i]])
+    right_side <- min(valleys[valleys > crop_rows[i]])
+  
+    chunks[[i]] <- c(left_side, middle, right_side)
+    
+  }
+  
+  # combining close chunks
+  for (i in 1:(length(chunks)-1)) {
+    if ((chunks[[i+1]][1] - chunks[[i]][3]) < (0.0175*dim(original_image)[1])) {
+      chunks[[i+1]][1] <- round(((chunks[[i+1]][1] + chunks[[i]][3])/2),0)
+      chunks[[i]][3] <- chunks[[i+1]][1]
+    }
+  }
+  return(chunks)
+}
+```
+
+```{r, warning=F, message=F,echo=F}
+# raw vert
+rotations_list <- rotations(raw_blob, 45)
+best_img <- best_rotation(rotations_list, ratio = 0.5, intensity = 0.25)
+picture_list <- rotations_list
+crop_rows_raw <- crop_row_finder(rotations_list, ratio = 0.5, final_ratio = 0.05, intensity = 0.25)
+raw_vertical <- vertical_strips(rotations_list, best_img, intensity = 0.25, crop_rows_raw, raw_blob)
+```
+
+```{r,echo=F}
+x_position <- function(chunks,base_image){
+  
+  position_x <- NULL
+  
+  for (i in 1:length(chunks)) {
+    if (chunks[[i]][2] < (dim(base_image)[1]/3)) {
+      position_x[i] <- "left"
+    } else if (chunks[[i]][2] > (dim(base_image)[1] - (dim(base_image)[1]/3))) {
+      position_x[i] <- "right"
+    } else {
+      position_x[i] <- "middle"
+    }
+  }
+  return(position_x)
+}
+```
+
+```{r,echo=F}
+raw_pos <- x_position(raw_vertical, raw_blob)
+```
+
+```{r,echo=F}
+# getting images of vertical strips for horizontal chops
+vertical_chunks <- function(image, chunks){
+  
+  i <- 1
+  chunk_img <- imsub(image, x %inr% c(chunks[[i]][1], chunks[[i]][3]))
+  chunk_list <- chunk_img
+  
+  while (i < (length(chunks))) {
+    i <- i + 1
+    chunk_img <- imsub(image, x %inr% c(chunks[[i]][1], chunks[[i]][3]))
+    chunk_list <- ci(chunk_list, chunk_img)
+  }
+  return(chunk_list)
+}
+```
+
+```{r,echo=F}
+raw_chunk_list <- vertical_chunks(raw_plush, raw_vertical)
+```
+
+```{r,echo=F}
+chop_spots <- function(chunk_list,intensity,image,break_sensitivity,min_amount){
+  
+  chop_values <- NULL
+
+  for (i in 1:length(chunk_list)){
+
+    chunk_bw_rot <- imrotate(chunk_list[[i]], -90)
+    smooth_hrz <- smoothing(chunk_bw_rot, intensity)
+    peaks_hrz <- localMaxima(smooth_hrz)
+    valleys_hrz <- localMinima(smooth_hrz)
+    good_valleys <- which(smooth_hrz[valleys_hrz] < break_sensitivity)
+    true_valleys_hrz <- valleys_hrz[good_valleys]
+    true_valleys_hrz <- c(1,true_valleys_hrz,as.numeric(dim(image)[2]))
+  
+    chop_values[[i]] <- list(true_valleys_hrz[1:length(true_valleys_hrz)-1])
+    chop_values[[i]][[2]] <- true_valleys_hrz[2:length(true_valleys_hrz)]
+  
+    #for (i in 1:length(chop_values)){
+    
+      for (k in 1:(length(chop_values[[i]][[1]]))){
+      
+        if (mean(smooth_hrz[chop_values[[i]][[1]][k]:chop_values[[i]][[2]][k]]) < min_amount) {
+          chop_values[[i]][[1]][k] <- NA
+          chop_values[[i]][[2]][k] <- NA
+        } 
+      }
+      chop_values[[i]][[1]] <- chop_values[[i]][[1]][!is.na(chop_values[[i]][[1]])]
+      chop_values[[i]][[2]] <- chop_values[[i]][[2]][!is.na(chop_values[[i]][[2]])]
+    
+      #}
+  }
+  return(chop_values)
+}
+```
+
+\pagebreak
+
+```{r,echo=F,fig.width=5.5,fig.align="center",fig.height=3}
+raw_chop <- chop_spots(raw_chunk_list, intensity = 0.6, raw_plush, break_sensitivity =  0, min_amount = 0.05)
+
+chop_df <- as.data.frame(smoothing(imrotate(raw_chunk_list[[13]], -90), 0.6))
+chop_df$num <- (1:nrow(chop_df))
+
+cat('By rotating the individual crop rows we found earlier we can find where \nthe breaks are within the row to make sure we include intentional gaps planted by farmers.')
+
+ggplot(data=chop_df,aes(x=num,y=smoothing(imrotate(raw_chunk_list[[13]], -90), 0.6))) + geom_line() + labs(x = 'Percent Crop', y = 'Column') + geom_vline(xintercept = raw_chop[[13]][[1]], linetype='solid',color = 'red', size=1) + geom_vline(xintercept = raw_chop[[13]][[2]], linetype='solid',color = 'red', size=1)
+```
+
+```{r,echo=F,fig.width=4.5,fig.align="center",fig.height=2}
+display(imrotate(raw_chunk_list[[13]], -90),method='raster')
+abline(v = raw_chop[[13]][[1]], col = 'red')
+abline(v = raw_chop[[13]][[2]], col = 'red')
+```
+
+\pagebreak
+
+```{r,echo=F}
+# position of chop in image
+# top and bot flipped
+y_position <- function(chop_values,image){
+  
+  position_y <- NULL
+  
+  for (i in 1:length(chop_values)) {
+    
+    sub_y <- NULL
+    
+    for (k in 1:(length(chop_values[[i]][[1]]))){
+      # if numeric(0) then dont add anything
+        if (length(chop_values[[i]][[1]]) == 0 | length(chop_values[[i]][[2]]) == 0) {
+        sub_y[k] <- "full"
+      } else if (((mean(chop_values[[i]][[1]][k] + chop_values[[i]][[2]][k]))) <= (as.numeric(dim(image)[2])/3)) {
+        sub_y[k] <- "top" 
+      } else if (((mean(chop_values[[i]][[1]][k] + chop_values[[i]][[2]][k]))) >= (as.numeric(dim(image)[2]) - as.numeric(dim(image)[2])/3)) {
+        sub_y[k] <- "bottom" 
+      } else {
+        sub_y[k] <- "middle" 
+      }
+    }
+  position_y[i] <- list(sub_y)
+  }
+  return(position_y)
+}
+
+# naming each strip --- deparse(substitute(image))
+chunk_names <- function(position_x,position_y,chop_values,chunks,number) {
+  
+  pic_names <- NULL
+  
+  for (i in 1:length(position_x)){
+    
+    temp_names <- NULL
+    
+    for (k in 1:length(position_y[[i]])){
+      temp_names[k] <- paste0("DJI","_",number,"_","chunk_",i,".",k,"_X_",position_x[i],"_Y_",position_y[[i]][k],"_HGT_",(chop_values[[i]][[2]][k] - chop_values[[i]][[1]][k]),"_WTH_",(chunks[[i]][3] - chunks[[i]][1]))
+    }
+  pic_names[i] <- list(temp_names)
+  }
+  pic_names <- unlist(pic_names)[!is.na(unlist(pic_names))]
+  return(pic_names)
+}
+```
+
+```{r,echo=F}
+# Y POSITION
+raw_pos_y <- y_position(raw_chop, raw_plush)
+
+# PICTURE NAMES (GET RID OF NA)
+raw_pic_names <- chunk_names(raw_pos, raw_pos_y, raw_chop, raw_vertical, img_num)
+```
+
+```{r,echo=F}
+box_photo <- function(chunks, chop_values) {
+  xleft <- NULL
+  xright <- NULL
+  ybot <- NULL
+  ytop <- NULL
+  
+  for (i in 1:length(chunks)) {
+    xltemp <- NULL
+    xrtemp <- NULL
+    ybtemp <- NULL
+    yttemp <- NULL
+    
+    for (k in 1:length(chop_values[[i]][[1]])){
+      xltemp[k] <- chunks[[i]][1]
+      xrtemp[k] <- chunks[[i]][3]
+      ybtemp[k] <- chop_values[[i]][[1]][k]
+      yttemp[k] <- chop_values[[i]][[2]][k]
+      }
+    xleft <- c(xleft,xltemp)
+    xright <- c(xright,xrtemp)
+    ybot <- c(ybot,ybtemp)
+    ytop <- c(ytop,yttemp)
+  }
+  box <- NULL
+  box[[1]] <- xleft
+  box[[2]] <- xright
+  box[[3]] <- ybot
+  box[[4]] <- ytop
+  return(box)
+}
+```
+
+```{r,echo=F,fig.align="center"}
+raw_boxes <- box_photo(raw_vertical, raw_chop)
+
+cat('Using row positions and chop positions (horizontal cutoffs) \nwe can make boxes around the crop rows and then extract the smaller images for further analysis.')
+
+plot(raw_image, axes=F)
+rect(raw_boxes[[1]]*5, raw_boxes[[3]]*5, raw_boxes[[2]]*5, raw_boxes[[4]]*5, border =   TRUE, density = 0, col = "red", lwd = 2)
+```
+
+
+
+
+
+
+
